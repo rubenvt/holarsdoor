@@ -13,8 +13,6 @@ document.querySelector('#app').innerHTML = `
       <div class="debug-section">
         <h3>Debug Information</h3>
         <div id="debug-output" class="debug-output"></div>
-        <button id="toggle-simulation" class="secondary-btn">Use Real API</button>
-        <div class="simulation-status">Current mode: <span id="api-mode">Simulation</span></div>
       </div>
     </div>
   </div>
@@ -26,19 +24,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const closeTimeInput = document.getElementById('close-time');
   const statusMessage = document.getElementById('status-message');
   const debugOutput = document.getElementById('debug-output');
-  const toggleSimulationBtn = document.getElementById('toggle-simulation');
-  const apiModeDisplay = document.getElementById('api-mode');
-  
-  let useRealApi = false;
-  
-  // Toggle between simulation and real API
-  toggleSimulationBtn.addEventListener('click', () => {
-    useRealApi = !useRealApi;
-    apiModeDisplay.textContent = useRealApi ? 'Real API' : 'Simulation';
-    toggleSimulationBtn.textContent = useRealApi ? 'Use Simulation' : 'Use Real API';
-    
-    debugLog(`Switched to ${useRealApi ? 'real API' : 'simulation'} mode`);
-  });
   
   openDoorBtn.addEventListener('click', async () => {
     const closeTime = parseInt(closeTimeInput.value, 10);
@@ -56,14 +41,14 @@ document.addEventListener('DOMContentLoaded', () => {
       
       clearDebugOutput();
       debugLog(`Initiating door open request with auto-close time: ${closeTime} seconds`);
-      debugLog(`Using ${useRealApi ? 'real API' : 'simulation'}`);
       
-      let response;
-      if (useRealApi) {
-        response = await controlDoor(closeTime);
-      } else {
-        response = await simulateApiCall(closeTime);
-      }
+      // Use a try-catch with a timeout to prevent message channel closing errors
+      const controlPromise = controlDoor(closeTime);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Request timed out')), 10000)
+      );
+      
+      const response = await Promise.race([controlPromise, timeoutPromise]);
       
       debugLog('Response received:', response);
       
@@ -71,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
       statusMessage.className = 'status success';
     } catch (error) {
       debugLog('Error occurred:', error);
-      statusMessage.textContent = `Error: ${error.message}`;
+      statusMessage.textContent = `Error: ${error.message || 'Failed to send request'}`;
       statusMessage.className = 'status error';
     } finally {
       openDoorBtn.disabled = false;
@@ -110,42 +95,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Function to simulate the API call with a delay
-function simulateApiCall(closeTime) {
-  return new Promise((resolve) => {
-    const apiKey = import.meta.env.VITE_API_KEY;
-    const lpin = import.meta.env.VITE_LPIN;
-    
-    const requestParams = {
-      authorization: apiKey,
-      lpin: lpin,
-      cmd: JSON.stringify({
-        output: {
-          node: '1',
-          time: closeTime.toString()
-        }
-      })
-    };
-    
-    console.log('API parameters that would be sent:', requestParams);
-    
-    // Simulate network delay
-    setTimeout(() => {
-      const simulatedResponse = { 
-        success: true, 
-        message: 'Door operation simulated successfully',
-        timestamp: new Date().toISOString(),
-        request: requestParams
-      };
-      resolve(simulatedResponse);
-    }, 1500);
-  });
-}
-
-// Real API function
+// Real API function with improved error handling
 async function controlDoor(closeTime) {
+  // Get API credentials from environment variables
   const apiKey = import.meta.env.VITE_API_KEY;
   const lpin = import.meta.env.VITE_LPIN;
+  
+  if (!apiKey || !lpin) {
+    throw new Error('API credentials are missing. Please check environment variables.');
+  }
   
   // Create the command object as per the API requirements
   const op = {
@@ -164,30 +122,42 @@ async function controlDoor(closeTime) {
     cmd: JSON.stringify(cmd)
   });
   
-  console.log('Sending real API request with params:', {
+  console.log('Sending API request with params:', {
     authorization: apiKey ? '***' + apiKey.substring(apiKey.length - 5) : 'undefined',
     lpin: lpin ? '***' + lpin.substring(lpin.length - 4) : 'undefined',
     cmd: JSON.stringify(cmd)
   });
   
   try {
-    // Make the API request
+    // Make the API request with improved error handling
     const response = await fetch('https://iot-portal.com/api/device.php', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
       },
-      body: params
+      body: params,
+      // Add a longer timeout to prevent message channel closing
+      signal: AbortSignal.timeout(8000)
     });
     
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
     }
     
     const data = await response.json();
     return data;
   } catch (error) {
     console.error('API request error:', error);
-    throw new Error('Failed to send door command: ' + error.message);
+    
+    // Provide more specific error messages based on the error type
+    if (error.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    } else if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+      throw new Error('Network error: This may be due to CORS restrictions. Please check the browser console for more details.');
+    } else {
+      throw new Error('Failed to send door command: ' + error.message);
+    }
   }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "vite-starter",
+  "name": "door-lock-control",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "archiver": "^7.0.1",
-    "vite": "^5.4.8"
+    "vite": "^4.4.5"
   }
 }
