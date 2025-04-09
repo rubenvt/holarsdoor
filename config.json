@@ -1,3 +1,5 @@
 {
-  "template": "vite"
+  "apiBaseUrl": "https://iot-portal.com/api/device.php",
+  "defaultAutoCloseTime": 30,
+  "maxAutoCloseTime": 300
 }

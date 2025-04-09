@@ -12,7 +12,7 @@
 
 # Add environment variables configuration
 [build.environment]
-  NODE_VERSION = "16"
+  NODE_VERSION = "18"
 
 # Add redirects for SPA - this is critical for handling routes
 [[redirects]]

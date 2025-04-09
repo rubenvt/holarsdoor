@@ -1,163 +1,233 @@
-import './style.css'
+import './style.css';
 
-document.querySelector('#app').innerHTML = `
-  <div class="container">
-    <h1>Door Lock Control</h1>
-    <div class="control-panel">
-      <div class="input-group">
-        <label for="close-time">Auto-close after (seconds):</label>
-        <input type="number" id="close-time" min="1" max="60" value="5">
+// Configuration and constants
+const API_KEY = import.meta.env.VITE_API_KEY;
+const LPIN = import.meta.env.VITE_LPIN;
+const API_BASE_URL = 'https://iot-portal.com/api/device.php';
+
+// DOM Elements
+let app;
+let statusElement;
+let debugOutput;
+let unlockButton;
+let autoCloseInput;
+
+// Initialize the application
+document.addEventListener('DOMContentLoaded', () => {
+  initializeApp();
+});
+
+function initializeApp() {
+  app = document.querySelector('#app');
+  renderUI();
+  
+  // Get DOM references after rendering
+  statusElement = document.querySelector('#status');
+  debugOutput = document.querySelector('#debug-output');
+  unlockButton = document.querySelector('#unlock-button');
+  autoCloseInput = document.querySelector('#auto-close-time');
+  
+  // Add event listeners
+  unlockButton.addEventListener('click', handleUnlockClick);
+  
+  // Log initialization
+  logMessage('Application initialized');
+  
+  // Check if environment variables are available
+  if (!API_KEY || !LPIN) {
+    logMessage('ERROR: API key or PIN not found in environment variables', true);
+    updateStatus('Configuration error. Check console for details.', 'error');
+    unlockButton.disabled = true;
+  } else {
+    logMessage('Configuration loaded successfully');
+    logMessage(`API Base URL: ${API_BASE_URL}`);
+  }
+}
+
+function renderUI() {
+  app.innerHTML = `
+    <div class="container">
+      <h1>Door Lock Control</h1>
+      
+      <div class="control-panel">
+        <div class="input-group">
+          <label for="auto-close-time">Auto-close after (seconds):</label>
+          <input type="number" id="auto-close-time" min="0" max="300" value="30">
+        </div>
+        
+        <button id="unlock-button" class="primary-btn">Unlock Door</button>
+        
+        <div id="status" class="status"></div>
       </div>
-      <button id="open-door" class="primary-btn">Open Door</button>
-      <div id="status-message" class="status"></div>
+      
       <div class="debug-section">
-        <h3>Debug Information</h3>
+        <h3>System Log</h3>
         <div id="debug-output" class="debug-output"></div>
       </div>
     </div>
-  </div>
-`
+  `;
+}
 
-// Door lock control functionality
-document.addEventListener('DOMContentLoaded', () => {
-  const openDoorBtn = document.getElementById('open-door');
-  const closeTimeInput = document.getElementById('close-time');
-  const statusMessage = document.getElementById('status-message');
-  const debugOutput = document.getElementById('debug-output');
+async function handleUnlockClick() {
+  const autoCloseTime = parseInt(autoCloseInput.value) || 0;
   
-  openDoorBtn.addEventListener('click', async () => {
-    const closeTime = parseInt(closeTimeInput.value, 10);
-    
-    if (isNaN(closeTime) || closeTime < 1) {
-      statusMessage.textContent = 'Please enter a valid time (minimum 1 second)';
-      statusMessage.className = 'status error';
-      return;
-    }
-    
-    try {
-      openDoorBtn.disabled = true;
-      statusMessage.textContent = 'Sending request...';
-      statusMessage.className = 'status pending';
-      
-      clearDebugOutput();
-      debugLog(`Initiating door open request with auto-close time: ${closeTime} seconds`);
-      
-      // Use a try-catch with a timeout to prevent message channel closing errors
-      const controlPromise = controlDoor(closeTime);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Request timed out')), 10000)
-      );
-      
-      const response = await Promise.race([controlPromise, timeoutPromise]);
-      
-      debugLog('Response received:', response);
-      
-      statusMessage.textContent = `Door opened successfully! Will close in ${closeTime} seconds.`;
-      statusMessage.className = 'status success';
-    } catch (error) {
-      debugLog('Error occurred:', error);
-      statusMessage.textContent = `Error: ${error.message || 'Failed to send request'}`;
-      statusMessage.className = 'status error';
-    } finally {
-      openDoorBtn.disabled = false;
-    }
-  });
-  
-  // Debug helper functions
-  function clearDebugOutput() {
-    debugOutput.innerHTML = '';
-  }
-  
-  function debugLog(message, data) {
-    const timestamp = new Date().toLocaleTimeString();
-    const logEntry = document.createElement('div');
-    logEntry.className = 'log-entry';
-    
-    let logContent = `<span class="timestamp">[${timestamp}]</span> ${message}`;
-    
-    if (data) {
-      let dataDisplay;
-      try {
-        dataDisplay = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
-      } catch (e) {
-        dataDisplay = String(data);
-      }
-      
-      logContent += `<pre>${dataDisplay}</pre>`;
-    }
-    
-    logEntry.innerHTML = logContent;
-    debugOutput.appendChild(logEntry);
-    debugOutput.scrollTop = debugOutput.scrollHeight;
-    
-    // Also log to console for additional debugging
-    console.log(`[${timestamp}] ${message}`, data || '');
-  }
-});
-
-// Real API function with improved error handling
-async function controlDoor(closeTime) {
-  // Get API credentials from environment variables
-  const apiKey = import.meta.env.VITE_API_KEY;
-  const lpin = import.meta.env.VITE_LPIN;
-  
-  if (!apiKey || !lpin) {
-    throw new Error('API credentials are missing. Please check environment variables.');
-  }
-  
-  // Create the command object as per the API requirements
-  const op = {
-    node: '1',
-    time: closeTime.toString()
-  };
-  
-  const cmd = {
-    output: op
-  };
-  
-  // Create the params object
-  const params = new URLSearchParams({
-    authorization: apiKey,
-    lpin: lpin,
-    cmd: JSON.stringify(cmd)
-  });
-  
-  console.log('Sending API request with params:', {
-    authorization: apiKey ? '***' + apiKey.substring(apiKey.length - 5) : 'undefined',
-    lpin: lpin ? '***' + lpin.substring(lpin.length - 4) : 'undefined',
-    cmd: JSON.stringify(cmd)
-  });
+  // Disable button during operation
+  unlockButton.disabled = true;
+  updateStatus('Sending unlock command...', 'pending');
   
   try {
-    // Make the API request with improved error handling
-    const response = await fetch('https://iot-portal.com/api/device.php', {
+    logMessage(`Attempting to unlock door with auto-close time: ${autoCloseTime}s`);
+    const result = await unlockDoor(autoCloseTime);
+    
+    if (result.success) {
+      updateStatus('Door unlocked successfully!', 'success');
+      logMessage('Door unlocked successfully');
+    } else {
+      updateStatus(`Failed to unlock: ${result.message}`, 'error');
+      logMessage(`Unlock failed: ${result.message}`, true);
+    }
+  } catch (error) {
+    updateStatus('Error communicating with door system', 'error');
+    logMessage(`Error: ${error.message}`, true);
+  } finally {
+    // Re-enable button
+    unlockButton.disabled = false;
+  }
+}
+
+async function unlockDoor(autoCloseTime = 0) {
+  try {
+    // Since API_BASE_URL is now the full endpoint, we don't need to append '/door/unlock'
+    const endpoint = API_BASE_URL;
+    logMessage(`Preparing API request to: ${endpoint}`);
+    
+    const requestOptions = {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${API_KEY}`
       },
-      body: params,
-      // Add a longer timeout to prevent message channel closing
-      signal: AbortSignal.timeout(8000)
+      body: JSON.stringify({
+        pin: LPIN,
+        auto_close_time: autoCloseTime,
+        action: 'unlock' // Adding action parameter for the API
+      })
+    };
+    
+    logMessage('Request options:', false, {
+      method: requestOptions.method,
+      headers: { ...requestOptions.headers, 'Authorization': 'Bearer [REDACTED]' },
+      body: requestOptions.body
     });
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-    }
+    // Add timeout to fetch request
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
-    const data = await response.json();
-    return data;
+    try {
+      const response = await fetch(endpoint, {
+        ...requestOptions,
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      logMessage(`Response status: ${response.status} ${response.statusText}`);
+      
+      // Try to parse response as JSON
+      let data;
+      try {
+        data = await response.json();
+        logMessage('API response received', false, data);
+      } catch (parseError) {
+        const textResponse = await response.text();
+        logMessage('Failed to parse JSON response', true, textResponse);
+        return {
+          success: false,
+          message: `Invalid response format: ${textResponse.substring(0, 100)}`
+        };
+      }
+      
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || `Server error: ${response.status}`
+        };
+      }
+      
+      return {
+        success: true,
+        data: data
+      };
+    } catch (fetchError) {
+      if (fetchError.name === 'AbortError') {
+        logMessage('Request timed out after 10 seconds', true);
+        return {
+          success: false,
+          message: 'Request timed out. The server did not respond in time.'
+        };
+      }
+      
+      // Check if it's a CORS error
+      if (fetchError.message.includes('CORS') || 
+          fetchError.message.includes('cross-origin')) {
+        logMessage('CORS error detected', true);
+        return {
+          success: false,
+          message: 'Cross-Origin Request Blocked: The API does not allow requests from this origin.'
+        };
+      }
+      
+      throw fetchError;
+    }
   } catch (error) {
-    console.error('API request error:', error);
-    
-    // Provide more specific error messages based on the error type
-    if (error.name === 'AbortError') {
-      throw new Error('Request timed out. Please try again.');
-    } else if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-      throw new Error('Network error: This may be due to CORS restrictions. Please check the browser console for more details.');
-    } else {
-      throw new Error('Failed to send door command: ' + error.message);
-    }
+    logMessage(`API request failed: ${error.message}`, true);
+    throw error;
+  }
+}
+
+function updateStatus(message, type = '') {
+  if (!statusElement) return;
+  
+  statusElement.textContent = message;
+  statusElement.className = 'status';
+  
+  if (type) {
+    statusElement.classList.add(type);
+  }
+}
+
+function logMessage(message, isError = false, data = null) {
+  if (!debugOutput) return;
+  
+  const timestamp = new Date().toLocaleTimeString();
+  const logEntry = document.createElement('div');
+  logEntry.className = 'log-entry';
+  
+  const timestampSpan = document.createElement('span');
+  timestampSpan.className = 'timestamp';
+  timestampSpan.textContent = `[${timestamp}]`;
+  
+  logEntry.appendChild(timestampSpan);
+  logEntry.appendChild(document.createTextNode(` ${message}`));
+  
+  if (isError) {
+    logEntry.style.color = '#e74c3c';
+  }
+  
+  if (data) {
+    const pre = document.createElement('pre');
+    pre.textContent = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
+    logEntry.appendChild(pre);
+  }
+  
+  debugOutput.appendChild(logEntry);
+  debugOutput.scrollTop = debugOutput.scrollHeight;
+  
+  // Also log to console for debugging
+  if (isError) {
+    console.error(message, data || '');
+  } else {
+    console.log(message, data || '');
   }
 }
