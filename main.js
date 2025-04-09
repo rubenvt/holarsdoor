@@ -13,8 +13,6 @@ document.querySelector('#app').innerHTML = `
       <div class="debug-section">
         <h3>Debug Information</h3>
         <div id="debug-output" class="debug-output"></div>
-        <button id="toggle-simulation" class="secondary-btn">Use Real API</button>
-        <div class="simulation-status">Current mode: <span id="api-mode">Simulation</span></div>
       </div>
     </div>
   </div>
@@ -26,19 +24,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const closeTimeInput = document.getElementById('close-time');
   const statusMessage = document.getElementById('status-message');
   const debugOutput = document.getElementById('debug-output');
-  const toggleSimulationBtn = document.getElementById('toggle-simulation');
-  const apiModeDisplay = document.getElementById('api-mode');
-  
-  let useRealApi = false;
-  
-  // Toggle between simulation and real API
-  toggleSimulationBtn.addEventListener('click', () => {
-    useRealApi = !useRealApi;
-    apiModeDisplay.textContent = useRealApi ? 'Real API' : 'Simulation';
-    toggleSimulationBtn.textContent = useRealApi ? 'Use Simulation' : 'Use Real API';
-    
-    debugLog(`Switched to ${useRealApi ? 'real API' : 'simulation'} mode`);
-  });
   
   openDoorBtn.addEventListener('click', async () => {
     const closeTime = parseInt(closeTimeInput.value, 10);
@@ -56,14 +41,8 @@ document.addEventListener('DOMContentLoaded', () => {
       
       clearDebugOutput();
       debugLog(`Initiating door open request with auto-close time: ${closeTime} seconds`);
-      debugLog(`Using ${useRealApi ? 'real API' : 'simulation'}`);
       
-      let response;
-      if (useRealApi) {
-        response = await controlDoor(closeTime);
-      } else {
-        response = await simulateApiCall(closeTime);
-      }
+      const response = await controlDoor(closeTime);
       
       debugLog('Response received:', response);
       
@@ -110,38 +89,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Function to simulate the API call with a delay
-function simulateApiCall(closeTime) {
-  return new Promise((resolve) => {
-    const apiKey = import.meta.env.VITE_API_KEY;
-    const lpin = import.meta.env.VITE_LPIN;
-    
-    const requestParams = {
-      authorization: apiKey,
-      lpin: lpin,
-      cmd: JSON.stringify({
-        output: {
-          node: '1',
-          time: closeTime.toString()
-        }
-      })
-    };
-    
-    console.log('API parameters that would be sent:', requestParams);
-    
-    // Simulate network delay
-    setTimeout(() => {
-      const simulatedResponse = { 
-        success: true, 
-        message: 'Door operation simulated successfully',
-        timestamp: new Date().toISOString(),
-        request: requestParams
-      };
-      resolve(simulatedResponse);
-    }, 1500);
-  });
-}
-
 // Real API function
 async function controlDoor(closeTime) {
   const apiKey = import.meta.env.VITE_API_KEY;
@@ -164,7 +111,7 @@ async function controlDoor(closeTime) {
     cmd: JSON.stringify(cmd)
   });
   
-  console.log('Sending real API request with params:', {
+  console.log('Sending API request with params:', {
     authorization: apiKey ? '***' + apiKey.substring(apiKey.length - 5) : 'undefined',
     lpin: lpin ? '***' + lpin.substring(lpin.length - 4) : 'undefined',
     cmd: JSON.stringify(cmd)
